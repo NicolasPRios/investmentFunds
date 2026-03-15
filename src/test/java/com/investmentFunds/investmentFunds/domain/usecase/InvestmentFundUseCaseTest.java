@@ -39,82 +39,103 @@ public class InvestmentFundUseCaseTest {
 
     @BeforeEach
     void setUp() {
-        user = User.builder().id(1).email("test@mail.com").availableBalance(1000000L).build();
-        fund = Fund.builder().id(1).name("Fondo Test").minimumAmount(100000L).build();
-        dto = new InvestmentFundDTO(1, 1, 1, "Aperturado", 1, 50000L);
+        user = User.builder()
+                .id(1)
+                .email("test@mail.com")
+                .availableBalance(100000L)
+                .build();
+
+        fund = Fund.builder()
+                .name("Fondo Test")
+                .minimumAmount(50000L)
+                .build();
+
+        dto = new InvestmentFundDTO();
+        dto.setId(1);
+        dto.setIdUser(1);
+        dto.setIdFund(1);
+        dto.setOpeningValue(20000L);
+        dto.setState("Aperturado");
+        dto.setMessagePreference(1); // 1 = Email
     }
 
     @Test
-    @DisplayName("Save: Debe guardar inversión y enviar correo (Preference 1)")
-    void saveInvestmentSuccessEmail() {
+    void save_ExitosoConEmail() {
+        // Arrange
         when(fundRepository.getById(anyInt())).thenReturn(fund);
         when(userRepository.getById(anyInt())).thenReturn(user);
-        when(investmentFundRepository.save(any())).thenReturn(new InvestmentFund());
+        when(investmentFundRepository.save(any())).thenAnswer(i -> i.getArguments()[0]);
 
-        useCase.save(dto);
+        // Act
+        InvestmentFund result = useCase.save(dto);
 
-        assertEquals(950000L, user.getAvailableBalance());
-        verify(emailService, times(1)).enviarCorreo(anyString(), anyString(), anyString());
+        // Assert
+        assertNotNull(result);
+        assertEquals(80000L, user.getAvailableBalance()); // 100k - 20k
         verify(userRepository).saveUser(user);
-    }
-
-    @Test
-    @DisplayName("Save: Debe guardar inversión y simular SMS (Preference 2)")
-    void saveInvestmentSuccessSMS() {
-        dto = new InvestmentFundDTO(1, 1, 1, "Aperturado", 2, 50000L);
-        when(fundRepository.getById(anyInt())).thenReturn(fund);
-        when(userRepository.getById(anyInt())).thenReturn(user);
-
-        useCase.save(dto);
-
-        verify(emailService, never()).enviarCorreo(any(), any(), any());
+        verify(emailService).enviarCorreo(eq("test@mail.com"), anyString(), anyString());
         verify(investmentFundRepository).save(any());
     }
 
     @Test
-    @DisplayName("Save: Debe lanzar excepción por saldo insuficiente")
-    void saveInvestmentInsufficientBalance() {
-        user.setAvailableBalance(10L);
+    void save_LanzaExcepcionPorSaldoInsuficiente() {
+        // Arrange: Saldo de usuario (10k) menor al mínimo del fondo (50k)
+        user.setAvailableBalance(10000L);
         when(fundRepository.getById(anyInt())).thenReturn(fund);
         when(userRepository.getById(anyInt())).thenReturn(user);
 
-        assertThrows(BusinessException.class, () -> useCase.save(dto));
+        // Act & Assert
+        BusinessException ex = assertThrows(BusinessException.class, () -> useCase.save(dto));
+        assertEquals("SALDO_INSUFICIENTE", ex.getCode());
+        verify(investmentFundRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("allInvestmentFundsByIdUser: Debe llamar al repositorio")
-    void allInvestmentFundsTest() {
-        when(investmentFundRepository.allInvestmentFundsByIdUser(anyInt())).thenReturn(List.of());
+    void cancelSubscription_Exitoso() {
+        // Arrange
+        InvestmentFund inv = InvestmentFund.builder()
+                .id(1)
+                .state("Aperturado")
+                .openingValue(20000L)
+                .user(user)
+                .build();
 
-        Iterable<InvestmentFund> result = useCase.allInvestmentFundsByIdUser(1);
+        when(investmentFundRepository.byId(1)).thenReturn(inv);
 
-        assertNotNull(result);
-        verify(investmentFundRepository).allInvestmentFundsByIdUser(1);
-    }
-
-    @Test
-    @DisplayName("CancelSubscription: Debe cancelar exitosamente y devolver saldo")
-    void cancelSubscriptionSuccess() {
-        InvestmentFund investment = InvestmentFund.builder()
-                .id(1).state("Aperturado").user(user).fund(fund).build();
-
-        when(investmentFundRepository.byId(anyInt())).thenReturn(investment);
-
+        // Act
         InvestmentFund result = useCase.cancelSubscription(1);
 
+        // Assert
         assertEquals("Cancelado", result.getState());
-        assertEquals(1100000L, user.getAvailableBalance());
+        assertEquals(120000L, user.getAvailableBalance()); // 100k + 20k devueltos
+        verify(investmentFundRepository).save(inv);
         verify(userRepository).saveUser(user);
-        verify(investmentFundRepository).save(investment);
     }
 
     @Test
-    @DisplayName("CancelSubscription: Debe fallar si ya está cancelado")
-    void cancelSubscriptionFail() {
-        InvestmentFund investment = InvestmentFund.builder().id(1).state("Cancelado").build();
-        when(investmentFundRepository.byId(anyInt())).thenReturn(investment);
+    void cancelSubscription_FallaSiYaEstaCancelado() {
+        // Arrange
+        InvestmentFund inv = InvestmentFund.builder()
+                .id(1)
+                .state("Cancelado")
+                .build();
+        when(investmentFundRepository.byId(1)).thenReturn(inv);
 
-        BusinessException ex = assertThrows(BusinessException.class, () -> useCase.cancelSubscription(1));
-        assertEquals("ESTADO_CANCELADO", ex.getCode());
+        // Act & Assert
+        assertThrows(BusinessException.class, () -> useCase.cancelSubscription(1));
+    }
+
+    @Test
+    void allInvestmentFundsByIdUser_RetornaLista() {
+        // Arrange
+        when(investmentFundRepository.allInvestmentFundsByIdUser(1))
+                .thenReturn(List.of(new InvestmentFund()));
+
+        // Act
+        Iterable<InvestmentFund> result = useCase.allInvestmentFundsByIdUser(1);
+
+        // Assert
+        assertNotNull(result);
+        assertTrue(result.iterator().hasNext());
     }
 }

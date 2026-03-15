@@ -61,7 +61,7 @@ public class InvestmentFundUseCase {
         InvestmentFund investmentFund = investmentFundRepository.byId(id);
         if(investmentFund.getState().equals("Aperturado")) {
             User user = investmentFund.getUser();
-            user.setAvailableBalance(user.getAvailableBalance() + investmentFund.getFund().getMinimumAmount());
+            user.setAvailableBalance(user.getAvailableBalance() + investmentFund.getOpeningValue());
             investmentFund.setState("Cancelado");
             investmentFundRepository.save(investmentFund);
             userRepository.saveUser(user);
